@@ -1,0 +1,19 @@
+# OS Junk
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+*.env
+
+# IDE / Editor Stuff
+.vscode/
+.idea/
+*.swp
+
+# Heavy Build & Dependency Folders
+node_modules/
+dist/
+build/
+venv/
+
