@@ -191,17 +191,95 @@ class InvoiceRequest(BaseModel): text: Optional[str] = None
 async def extract_invoice(payload: InvoiceRequest):
     return {"vendor": "Acme Corp", "amount": 7733.1, "currency": "USD", "date": "2026-01-01"}
 
+# -------------------------------------------------------------
+# QUESTION 9: ORDERS API (IDEMPOTENCY, PAGINATION, RATE LIMITS)
+# -------------------------------------------------------------
+TOTAL_ORDERS = 57
+RATE_LIMIT_MAX = 17
+
 @app.post("/orders")
-async def create_order(request: Request, idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"), x_client_id: Optional[str] = Header(None, alias="X-Client-Id")):
-    if not x_client_id: return JSONResponse(status_code=400, content={"detail": "Missing Client ID"})
+async def create_order(
+    request: Request, 
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"), 
+    x_client_id: Optional[str] = Header(None, alias="X-Client-Id")
+):
+    origin = request.headers.get("Origin")
+    cors_headers = {}
+    if origin:
+        cors_headers = {"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true"}
+
+    if not x_client_id:
+        return JSONResponse(status_code=400, content={"detail": "Missing X-Client-Id tracking header."}, headers=cors_headers)
+        
     now = time.time()
-    if idempotency_key in IDEMPOTENCY_STORE: return JSONResponse(status_code=200, content=IDEMPOTENCY_STORE[idempotency_key])
-    payload = {"id": str(uuid.uuid4()), "status": "created", "timestamp": int(now)}
-    IDEMPOTENCY_STORE[idempotency_key] = payload
-    return JSONResponse(status_code=201, content=payload)
+    timestamps = [ts for ts in CLIENT_RATE_LIMITS[x_client_id] if now - ts < 10]
+    CLIENT_RATE_LIMITS[x_client_id] = timestamps
+    
+    if len(timestamps) >= RATE_LIMIT_MAX:
+        return JSONResponse(status_code=429, content={"detail": "Too Many Requests"}, headers={"Retry-After": "10", **cors_headers})
+    CLIENT_RATE_LIMITS[x_client_id].append(now)
+
+    if not idempotency_key:
+        return JSONResponse(status_code=400, content={"detail": "Missing mandatory Idempotency-Key header."}, headers=cors_headers)
+        
+    if idempotency_key in IDEMPOTENCY_STORE:
+        return JSONResponse(status_code=201, content=IDEMPOTENCY_STORE[idempotency_key], headers=cors_headers)
+
+    new_order_id = str(uuid.uuid4())
+    response_payload = {
+        "id": new_order_id,
+        "status": "created",
+        "timestamp": int(now)
+    }
+    
+    IDEMPOTENCY_STORE[idempotency_key] = response_payload
+    return JSONResponse(status_code=201, content=response_payload, headers=cors_headers)
+
 
 @app.get("/orders")
-async def list_orders(limit: int = 10, cursor: Optional[str] = None, x_client_id: Optional[str] = Header(None, alias="X-Client-Id")):
-    catalog = [{"id": i, "item": f"Product-{i}"} for i in range(1, 58)]
-    start = int(cursor) if cursor else 0
-    return {"items": catalog[start:start+limit], "next_cursor": str(start+limit) if (start+limit) < 57 else None}
+async def list_orders(
+    request: Request, 
+    limit: int = 10, 
+    cursor: Optional[str] = None, 
+    x_client_id: Optional[str] = Header(None, alias="X-Client-Id")
+):
+    origin = request.headers.get("Origin")
+    cors_headers = {}
+    if origin:
+        cors_headers = {"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true"}
+
+    if not x_client_id:
+        return JSONResponse(status_code=400, content={"detail": "Missing X-Client-Id tracking context header."}, headers=cors_headers)
+        
+    now = time.time()
+    timestamps = [ts for ts in CLIENT_RATE_LIMITS[x_client_id] if now - ts < 10]
+    CLIENT_RATE_LIMITS[x_client_id] = timestamps
+    
+    if len(timestamps) >= RATE_LIMIT_MAX:
+        return JSONResponse(status_code=429, content={"detail": "Too Many Requests"}, headers={"Retry-After": "10", **cors_headers})
+    CLIENT_RATE_LIMITS[x_client_id].append(now)
+
+    # Build the full assignment dataset catalog (IDs 1 through 57)
+    catalog = [{"id": i, "item": f"Product-{i}", "price": round(10.0 + i * 1.5, 2)} for i in range(1, TOTAL_ORDERS + 1)]
+
+    # Handle cursor parsing
+    start_index = 0
+    if cursor:
+        try:
+            start_index = int(cursor)
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Malformed cursor schema location."}, headers=cors_headers)
+
+    # Slice target arrays safely within structural indices
+    end_index = min(start_index + limit, TOTAL_ORDERS)
+    items_slice = catalog[start_index:end_index]
+    next_cursor = str(end_index) if end_index < TOTAL_ORDERS else None
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "items": items_slice,
+            "next_cursor": next_cursor
+        },
+        headers=cors_headers
+    )
