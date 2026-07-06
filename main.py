@@ -11,29 +11,21 @@ from typing import List
 
 app = FastAPI()
 
-# Enable open CORS rules required by the grading scripts
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # -------------------------------------------------------------
 # SHARED ASSIGNED VALUES
 # -------------------------------------------------------------
-ALLOWED_ORIGIN = "https://example.com"
+ALLOWED_ORIGIN = "https://dash-ofua0z.example.com"
 YOUR_EMAIL = "24f3004027@ds.study.iitm.ac.in"
 
 # -------------------------------------------------------------
-# QUESTION 1 MIDDLEWARE & ENDPOINT
+# DYNAMIC CORS MIDDLEWARE
 # -------------------------------------------------------------
 @app.middleware("http")
 async def custom_middleware(request: Request, call_next):
     start_time = time.perf_counter()
     request_id = str(uuid.uuid4())
     
+    # Pre-intercept preflight checks explicitly
     if request.method == "OPTIONS":
         response = Response(status_code=204)
     else:
@@ -44,13 +36,27 @@ async def custom_middleware(request: Request, call_next):
     response.headers["X-Process-Time"] = f"{process_time:.6f}"
     
     origin = request.headers.get("Origin")
-    if origin == ALLOWED_ORIGIN:
-        response.headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN
-        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS, POST"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Request-ID"
+    path = request.url.path
+
+    if path == "/analytics":
+        # Question 5 Rules: Allow any cross-origin domain calling the endpoint
+        if origin:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Key, Authorization"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+    else:
+        # Question 1 Rules: Only allow the explicit assigned layout domain
+        if origin == ALLOWED_ORIGIN:
+            response.headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN
+            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS, POST"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Request-ID"
         
     return response
 
+# -------------------------------------------------------------
+# QUESTION 1 ENDPOINT
+# -------------------------------------------------------------
 @app.get("/stats")
 async def get_stats(values: str = None):
     if not values:
@@ -168,7 +174,7 @@ async def get_effective_config(request: Request):
     return config
 
 # -------------------------------------------------------------
-# QUESTION 5: POST ANALYTICS ENDPOINT
+# QUESTION 5 ENDPOINT
 # -------------------------------------------------------------
 ASSIGNED_API_KEY = "ak_lf8ln76b46whtg5apaxsh5wu"
 
@@ -182,7 +188,6 @@ class AnalyticsPayload(BaseModel):
 
 @app.post("/analytics")
 async def post_analytics(payload: AnalyticsPayload, x_api_key: str = Header(None, alias="X-API-Key")):
-    # Authenticate using custom API Key structure
     if x_api_key != ASSIGNED_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -200,12 +205,10 @@ async def post_analytics(payload: AnalyticsPayload, x_api_key: str = Header(None
         user_name = event.user
         unique_users_set.add(user_name)
         
-        # Aggregation logic: ignore zero and negative values
         if event.amount > 0:
             total_revenue += event.amount
             user_revenue[user_name] += event.amount
             
-    # Calculate top user based on highest positive volume
     top_user = None
     if user_revenue:
         top_user = max(user_revenue, key=user_revenue.get)
