@@ -222,3 +222,85 @@ async def extract_invoice(payload: InvoiceRequest):
         currency=extracted_currency,
         date=extracted_date
     )
+
+# -------------------------------------------------------------
+# QUESTION 9: ORDERS API (IDEMPOTENCY, PAGINATION, RATE LIMITS)
+# -------------------------------------------------------------
+TOTAL_ORDERS = 57
+RATE_LIMIT_MAX = 17
+
+@app.post("/orders", status_code=201)
+async def create_order(request: Request, idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"), x_client_id: Optional[str] = Header(None, alias="X-Client-Id")):
+    # Enforce Client Identification Check
+    if not x_client_id:
+        raise HTTPException(status_code=400, detail="Missing X-Client-Id tracking context header.")
+        
+    # Rate Limiting Engine: Sliding 10s Window calculation
+    now = time.time()
+    timestamps = CLIENT_RATE_LIMITS[x_client_id]
+    # Filter out historical timestamps outside our active window
+    timestamps = [ts for ts in timestamps if now - ts < 10]
+    CLIENT_RATE_LIMITS[x_client_id] = timestamps
+    
+    if len(timestamps) >= RATE_LIMIT_MAX:
+        return Response(
+            status_code=429,
+            content="Too Many Requests",
+            headers={"Retry-After": "10"}
+        )
+    CLIENT_RATE_LIMITS[x_client_id].append(now)
+
+    # Idempotency Layer Verification
+    if not idempotency_key:
+        raise HTTPException(status_code=400, detail="Missing mandatory Idempotency-Key validation header.")
+        
+    if idempotency_key in IDEMPOTENCY_STORE:
+        # Cache Hit: return matching structured payload instantly
+        return IDEMPOTENCY_STORE[idempotency_key]
+
+    # Generate a fresh transaction structure
+    new_order_id = str(uuid.uuid4())
+    response_payload = {
+        "id": new_order_id,
+        "status": "created",
+        "timestamp": int(now)
+    }
+    
+    IDEMPOTENCY_STORE[idempotency_key] = response_payload
+    return response_payload
+
+@app.get("/orders")
+async def list_orders(limit: int = 10, cursor: Optional[str] = None, x_client_id: Optional[str] = None):
+    if not x_client_id:
+        raise HTTPException(status_code=400, detail="Missing X-Client-Id tracking context header.")
+
+    # Rate Limiting Check for the pagination endpoint
+    now = time.time()
+    timestamps = CLIENT_RATE_LIMITS[x_client_id]
+    timestamps = [ts for ts in timestamps if now - ts < 10]
+    CLIENT_RATE_LIMITS[x_client_id] = timestamps
+
+    if len(timestamps) >= RATE_LIMIT_MAX:
+        return Response(status_code=429, content="Too Many Requests", headers={"Retry-After": "10"})
+
+    CLIENT_RATE_LIMITS[x_client_id].append(now)
+
+    # Catalog Build (IDs 1 through 57)
+    catalog = [{"id": i, "item": f"Product-{i}", "price": round(10.0 + i * 1.5, 2)} for i in range(1, TOTAL_ORDERS + 1)]
+
+    # Determine structural slice cursor start point
+    start_index = 0
+    if cursor:
+        try:
+            start_index = int(cursor)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Malformed cursor layout.")
+
+    # Slice catalog safely within limits
+    end_index = min(start_index + limit, TOTAL_ORDERS)
+    items_slice = catalog[start_index:end_index]
+
+    # Calculate next opaque page index string token
+    next_cursor = str(end_index) if end_index < TOTAL_ORDERS else None
+
+    return {"items": items_slice, "next_cursor": next_cursor}
