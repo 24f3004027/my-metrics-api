@@ -90,19 +90,27 @@ async def master_middleware(request: Request, call_next):
     return response
 
 # -------------------------------------------------------------
-# QUESTION 10: MIDDLEWARE STACK ENDPOINT
+# QUESTION 10: MIDDLEWARE STACK ENDPOINT (FIXED REUSE LOGIC)
 # -------------------------------------------------------------
 @app.get("/ping")
-async def get_ping(request: Request, x_client_id: Optional[str] = Header(None, alias="X-Client-Id")):
+async def get_ping(
+    request: Request, 
+    x_client_id: Optional[str] = Header(None, alias="X-Client-Id"),
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID")
+):
     origin = request.headers.get("Origin")
     
-    # Base response header template to support browser verification steps
-    cors_headers = {}
+    # 1. Reuse existing context ID or fall back to the middleware generated state ID
+    final_request_id = x_request_id if x_request_id else getattr(request.state, "request_id", str(uuid.uuid4()))
+    
+    # 2. Build explicit cross-origin header schema configuration
+    cors_headers = {
+        "X-Request-ID": final_request_id
+    }
     if origin:
-        cors_headers = {
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Credentials": "true"
-        }
+        cors_headers["Access-Control-Allow-Origin"] = origin
+        cors_headers["Access-Control-Allow-Credentials"] = "true"
+        cors_headers["Access-Control-Expose-Headers"] = "X-Request-ID, X-Process-Time"
 
     if not x_client_id:
         return JSONResponse(status_code=400, content={"detail": "Missing X-Client-Id header."}, headers=cors_headers)
@@ -121,11 +129,11 @@ async def get_ping(request: Request, x_client_id: Optional[str] = Header(None, a
         status_code=200,
         content={
             "email": YOUR_EMAIL,
-            "request_id": request.state.request_id
+            "request_id": final_request_id
         },
         headers=cors_headers
     )
-
+   
 # -------------------------------------------------------------
 # HISTORICAL COMPLIANT ENDPOINTS (Q1, Q2, Q3, Q5, Q6, Q8, Q9)
 # -------------------------------------------------------------
