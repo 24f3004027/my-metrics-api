@@ -17,7 +17,7 @@ app = FastAPI()
 # -------------------------------------------------------------
 # GLOBAL CONFIGURATION
 # -------------------------------------------------------------
-Q10_ALLOWED_ORIGIN = "https://app-m8r9li.example.com"
+Q10_ALLOWED_ORIGIN = "https://dash-ofua0z.example.com"
 YOUR_EMAIL = "24f3004027@ds.study.iitm.ac.in"
 
 START_TIME = time.time()
@@ -37,11 +37,14 @@ RATE_LIMIT_WINDOW = 10
 # -------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[Q10_ALLOWED_ORIGIN],
     allow_credentials=False,
-    allow_methods=["*"],
+    allow_methods=["GET", "OPTIONS"],
     allow_headers=["*"],
-    expose_headers=["Retry-After", "X-Request-ID", "X-Process-Time"],
+    expose_headers=[
+        "X-Request-ID",
+        "X-Process-Time",
+    ],
 )
 
 # -------------------------------------------------------------
