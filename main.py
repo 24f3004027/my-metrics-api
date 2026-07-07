@@ -57,10 +57,7 @@ async def master_middleware(request: Request, call_next):
 
     start_time_perf = time.perf_counter()
 
-    if request.method == "OPTIONS":
-        response = Response(status_code=204)
-    else:
-        response = await call_next(request)
+    response = await call_next(request)
 
     process_time = time.perf_counter() - start_time_perf
 
