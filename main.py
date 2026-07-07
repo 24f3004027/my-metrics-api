@@ -157,17 +157,22 @@ async def verify_token(payload: TokenRequest):
             PUBLIC_KEY,
             algorithms=["RS256"],
             audience="tds-4uijijf7.apps.exam.local",
-            issuer="https://exam.local"
+            issuer="https://idp.exam.local",
         )
+
         return {
             "valid": True,
-            "email": decoded.get("email"),
-            "sub": decoded.get("sub"),
-            "aud": decoded.get("aud")
+            "email": decoded["email"],
+            "sub": decoded["sub"],
+            "aud": decoded["aud"],
         }
-    except jwt.PyJWTError:
-        return JSONResponse(status_code=401, content={"valid": False})
 
+    except jwt.PyJWTError:
+        return JSONResponse(
+            status_code=401,
+            content={"valid": False},
+        )
+        
 @app.get("/effective-config")
 async def get_effective_config():
     return {"port": 8150, "workers": 1, "debug": True, "log_level": "warning", "api_key": "****"}
